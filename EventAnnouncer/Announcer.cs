@@ -33,11 +33,15 @@ namespace EventAnnouncer
                 .AddEnvironmentVariables()
                 .Build();
 
-            string calendarId = config["CALENDAR_ID"];
-            string calendarApiKey = config["CALENDAR_APIKEY"];
-            string webhookId = config["WEBHOOK_ID"];
 
-            (new Announcer(log, calendarId, calendarApiKey, webhookId)).ProcessCalendarEvents();
+            var announcer = new Announcer(
+                log,
+                config["CALENDAR_ID"],
+                config["CALENDAR_APIKEY"],
+                config["WEBHOOK_ID"]
+            );
+            announcer.ProcessCalendarEvents();
+
             return Task.CompletedTask;
         }
 
