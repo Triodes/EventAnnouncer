@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Text;
+using System.Web;
 using System.Threading.Tasks;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,7 @@ using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
 using Microsoft.Extensions.Configuration;
+using HtmlAgilityPack;
 
 namespace EventAnnouncer
 {
@@ -67,7 +69,7 @@ namespace EventAnnouncer
             request.TimeMin = DateTime.UtcNow;
             request.ShowDeleted = false;
             request.SingleEvents = true;
-            request.MaxResults = 5;
+            request.MaxResults = 10;
             request.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
 
             // List events.
@@ -76,47 +78,72 @@ namespace EventAnnouncer
 
             DateTime now = DateTime.Now;
 
-            if (events.Items != null && events.Items.Count > 0)
+            if (events.Items == null || events.Items.Count < 1)
+                return;
+
+            foreach (Event eventItem in events.Items)
             {
-                foreach (Event eventItem in events.Items)
+                DateTime? nDateTime = eventItem.Start.DateTime;
+                if (!nDateTime.HasValue)
+                    continue;
+
+                DateTime dateTime = nDateTime.Value;
+
+                DateTime advance1 = dateTime.Subtract(TimeSpan.FromMinutes(1));
+                DateTime advance30 = dateTime.Subtract(TimeSpan.FromMinutes(30));
+
+                double diff1 = (advance1 - now).TotalMinutes;
+                double diff30 = (advance30 - now).TotalMinutes;
+
+                if (diff1 >= -1d && diff1 < 0d)
                 {
-                    DateTime? nDateTime = eventItem.Start.DateTime;
-                    if (!nDateTime.HasValue)
-                        continue;
+                    string message = ConstructMessage("soon", eventItem);
+                    SendDiscordMessage(message);
+                }
 
-                    DateTime dateTime = nDateTime.Value;
-
-                    DateTime advance1 = dateTime.Subtract(TimeSpan.FromMinutes(1));
-                    DateTime advance30 = dateTime.Subtract(TimeSpan.FromMinutes(30));
-
-                    double diff1 = (advance1 - now).TotalMinutes;
-                    double diff30 = (advance30 - now).TotalMinutes;
-                    
-                    if (diff1 >= -1d && diff1 < 0d)
-                    {
-                        string message = ContstructMessage("soon", eventItem);
-                        SendDiscordMessage(message);
-                    }
-
-                    if (diff30 >= -1d && diff30 < 0d)
-                    {
-                        string message = ContstructMessage("in 30 minutes", eventItem);
-                        SendDiscordMessage(message);
-                    }
+                if (diff30 >= -1d && diff30 < 0d)
+                {
+                    string message = ConstructMessage("in 30 minutes", eventItem);
+                    SendDiscordMessage(message);
                 }
             }
         }
 
-        private string ContstructMessage(string advance, Event e)
+        private string ConstructMessage(string advance, Event e)
         {
+            string description = FormatDescription(e.Description);
+
             StringBuilder builder = new StringBuilder();
             string time = e.Start.DateTime.Value.ToUniversalTime().ToString("HH:mm");
-            builder.Append($"The next clan event will begin **{advance}**. The event is:\n\n**{time} - {e.Summary}**\n*{e.Description}*\n\n");
+            builder.Append($"The next clan event will begin **{advance}**. The event is:\n\n**{time} - {e.Summary}**\n*{description}*\n\n");
             if (e.Location != null)
                 builder.Append($"We'll be meeting up at: *{e.Location}*\n\n");
             builder.Append("See you there!");
 
             return builder.ToString();
+        }
+
+        private string FormatDescription(string description)
+        {
+            if (String.IsNullOrWhiteSpace(description))
+                return "";
+
+            HtmlDocument doc = new HtmlDocument();
+            doc.LoadHtml(description);
+
+            var descBuilder = new StringBuilder();
+            foreach (var node in doc.DocumentNode.SelectNodes("//text()"))
+            {
+                string format = "{0}";
+                if (node.ParentNode.Name == "b")
+                    format = $"**{format}**";
+                descBuilder.Append(String.Format(format, node.InnerText));
+            }
+
+            description = descBuilder.ToString();
+            description = HttpUtility.HtmlDecode(description);
+
+            return description;
         }
 
         private async void SendDiscordMessage(string message)
